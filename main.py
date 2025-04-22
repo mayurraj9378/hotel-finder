@@ -1,146 +1,63 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
 import requests
+import pandas as pd
 import time
 import urllib.parse
-import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, confusion_matrix
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-import nltk
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
+import random
+from datetime import datetime, timedelta
 
-# Download NLTK resources
-try:
-    nltk.data.find('vader_lexicon')
-except LookupError:
-    nltk.download('vader_lexicon')
+# Set page configuration
+st.set_page_config(
+    page_title="Smart Hotel Recommender",
+    page_icon="🏨",
+    layout="wide"
+)
 
-# Initialize sentiment analyzer
-sid = SentimentIntensityAnalyzer()
+# Custom CSS for better appearance
+st.markdown("""
+<style>
+    .hotel-card {
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid #ddd;
+        margin-bottom: 20px;
+    }
+    .recommendation-badge {
+        background-color: #FF5722;
+        color: white;
+        padding: 5px 10px;
+        border-radius: 5px;
+        font-weight: bold;
+        margin-right: 10px;
+    }
+    .rating-high {
+        color: #4CAF50;
+        font-weight: bold;
+    }
+    .rating-medium {
+        color: #FF9800;
+        font-weight: bold;
+    }
+    .rating-low {
+        color: #F44336;
+        font-weight: bold;
+    }
+    .hotel-image {
+        width: 100%;
+        border-radius: 5px;
+        margin-bottom: 10px;
+    }
+    .feature-tag {
+        background-color: #E0F7FA;
+        padding: 3px 8px;
+        border-radius: 10px;
+        font-size: 0.8em;
+        margin-right: 5px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# Load sample data (in a real app, you'd connect to a database)
-@st.cache_data
-def load_sample_data():
-    # Sample hotel data
-    hotels = pd.DataFrame({
-        'hotel_id': range(1, 21),
-        'name': [
-            'Grand Plaza Hotel', 'Seaside Resort', 'Mountain View Lodge', 'City Center Inn',
-            'Luxury Palace Hotel', 'Business Executive Suites', 'Family Fun Resort', 'Historic Boutique Hotel',
-            'Modern Minimalist Hotel', 'Beachfront Paradise', 'Urban Oasis Hotel', 'Countryside Retreat',
-            'Skyline Hotel', 'Heritage Grand Hotel', 'Tech-Savvy Suites', 'Wellness Spa Resort',
-            'Adventure Base Camp', 'Romantic Getaway Inn', 'Budget Friendly Motel', 'Exclusive Club Resort'
-        ],
-        'location': ['Downtown', 'Beach', 'Mountains', 'City Center', 'Uptown', 'Business District', 
-                    'Suburban', 'Old Town', 'Arts District', 'Beachfront', 'Urban', 'Countryside', 
-                    'City View', 'Historic District', 'Tech Hub', 'Lakeside', 'National Park', 
-                    'Countryside', 'Highway Access', 'Private Island'],
-        'price_category': ['Luxury', 'Premium', 'Mid-range', 'Budget', 'Luxury', 'Business', 'Family', 
-                           'Boutique', 'Modern', 'Premium', 'Mid-range', 'Budget', 'Business', 'Luxury', 
-                           'Modern', 'Premium', 'Adventure', 'Romantic', 'Budget', 'Luxury'],
-        'avg_rating': [4.7, 4.5, 4.2, 3.8, 4.9, 4.3, 4.1, 4.4, 4.0, 4.6, 4.2, 3.9, 4.1, 4.8, 4.0, 4.5, 4.3, 4.7, 3.5, 4.9],
-        'amenities': [
-            'Pool, Spa, Restaurant, Gym, WiFi', 'Beach access, Pool, Restaurant, WiFi',
-            'Hiking trails, Restaurant, Fireplace, WiFi', 'Restaurant, WiFi, Business Center',
-            'Pool, Spa, Multiple Restaurants, Gym, WiFi, Concierge', 'Business Center, WiFi, Restaurant, Gym',
-            'Kids Club, Pool, Restaurant, Playground, WiFi', 'Room Service, Restaurant, WiFi, Historic Tours',
-            'WiFi, Restaurant, Modern Art, Gym', 'Private Beach, Pool, Restaurant, Water Sports, WiFi',
-            'Restaurant, WiFi, Rooftop Bar, Gym', 'Garden, WiFi, Restaurant, Nature Trails',
-            'Restaurant, WiFi, Business Center, City Tours', 'Pool, Spa, Fine Dining, WiFi, Heritage Tours',
-            'High-speed WiFi, Smart Rooms, Co-working Space, Restaurant', 'Spa, Yoga, Pool, Healthy Restaurant, WiFi',
-            'Guided Tours, Equipment Rental, Restaurant, WiFi', 'Spa, Fine Dining, WiFi, Couples Activities',
-            'WiFi, Basic Breakfast, Parking', 'Private Beach, Pool, Spa, Gourmet Dining, Water Sports, WiFi'
-        ]
-    })
-    
-    # Sample customer data
-    np.random.seed(42)
-    n_customers = 500
-    customer_ids = range(1, n_customers + 1)
-    age = np.random.randint(18, 75, n_customers)
-    gender = np.random.choice(['M', 'F'], n_customers)
-    income_levels = np.random.choice(['Low', 'Medium', 'High'], n_customers, p=[0.3, 0.5, 0.2])
-    travel_purpose = np.random.choice(['Business', 'Leisure', 'Family', 'Romantic'], n_customers)
-    preferred_amenities = np.random.choice(['WiFi', 'Pool', 'Spa', 'Restaurant', 'Gym', 'Beach access'], n_customers)
-    
-    customers = pd.DataFrame({
-        'customer_id': customer_ids,
-        'age': age,
-        'gender': gender,
-        'income_level': income_levels,
-        'travel_purpose': travel_purpose,
-        'preferred_amenity': preferred_amenities
-    })
-    
-    # Sample booking data
-    n_bookings = 1000
-    booking_ids = range(1, n_bookings + 1)
-    customer_ids_bookings = np.random.choice(customer_ids, n_bookings)
-    hotel_ids_bookings = np.random.choice(hotels['hotel_id'], n_bookings)
-    booking_date = pd.date_range(start='2022-01-01', end='2023-06-30', periods=n_bookings)
-    length_of_stay = np.random.randint(1, 10, n_bookings)
-    booking_value = np.random.uniform(100, 1000, n_bookings)
-    canceled = np.random.choice([0, 1], n_bookings, p=[0.8, 0.2])
-    lead_time = np.random.randint(1, 100, n_bookings)
-    season = np.random.choice(['Winter', 'Spring', 'Summer', 'Fall'], n_bookings)
-    booking_channel = np.random.choice(['Direct', 'OTA', 'Travel Agent', 'Corporate'], n_bookings)
-    
-    bookings = pd.DataFrame({
-        'booking_id': booking_ids,
-        'customer_id': customer_ids_bookings,
-        'hotel_id': hotel_ids_bookings,
-        'booking_date': booking_date,
-        'length_of_stay': length_of_stay,
-        'booking_value': booking_value,
-        'canceled': canceled,
-        'lead_time': lead_time,
-        'season': season,
-        'booking_channel': booking_channel
-    })
-    
-    # Sample review data
-    n_reviews = 800
-    review_ids = range(1, n_reviews + 1)
-    customer_ids_reviews = np.random.choice(customer_ids, n_reviews)
-    hotel_ids_reviews = np.random.choice(hotels['hotel_id'], n_reviews)
-    
-    review_texts = [
-        "Great hotel, really enjoyed my stay!",
-        "Good value for money, but the room was a bit small.",
-        "Excellent service and friendly staff.",
-        "Beautiful location, but the food could be better.",
-        "Perfect for a business trip, good amenities.",
-        "Loved the pool and spa facilities!",
-        "Disappointing experience, the room was not clean.",
-        "Amazing views and comfortable beds.",
-        "The staff was very helpful and attentive.",
-        "Noisy location, couldn't sleep well."
-    ]
-    
-    review_text = np.random.choice(review_texts, n_reviews)
-    rating = np.random.randint(1, 6, n_reviews)
-    review_date = pd.date_range(start='2022-01-01', end='2023-06-30', periods=n_reviews)
-    
-    reviews = pd.DataFrame({
-        'review_id': review_ids,
-        'customer_id': customer_ids_reviews,
-        'hotel_id': hotel_ids_reviews,
-        'review_text': review_text,
-        'rating': rating,
-        'review_date': review_date
-    })
-    
-    return hotels, customers, bookings, reviews
-
-# Function to get hotels from OpenStreetMap API
-def get_hotels_osm(location, keyword=None):
+def get_hotels_with_recommendations(location, preferences, budget_level, trip_purpose, min_rating=0):
     # URL encode the location
     encoded_location = urllib.parse.quote(location)
     
@@ -148,8 +65,12 @@ def get_hotels_osm(location, keyword=None):
     geocode_url = f"https://nominatim.openstreetmap.org/search?q={encoded_location}&format=json"
     
     headers = {
-        "User-Agent": "HotelFinderApp/1.0"  # Nominatim requires a user agent
+        "User-Agent": "HotelRecommenderApp/1.0"  # Nominatim requires a user agent
     }
+    
+    if st.session_state.get('debug_mode', False):
+        st.sidebar.write("Geocoding URL:")
+        st.sidebar.code(geocode_url, language="text")
     
     try:
         # Get coordinates for the location
@@ -158,35 +79,61 @@ def get_hotels_osm(location, keyword=None):
         location_data = response.json()
         
         if not location_data:
-            st.sidebar.error("Location not found in OpenStreetMap")
+            if st.session_state.get('debug_mode', False):
+                st.sidebar.error("Location not found in OpenStreetMap")
             return []
         
         # Extract latitude and longitude
         lat = location_data[0]["lat"]
         lon = location_data[0]["lon"]
         
+        if st.session_state.get('debug_mode', False):
+            st.sidebar.success(f"Location found: {location_data[0].get('display_name')}")
+            st.sidebar.write(f"Coordinates: {lat}, {lon}")
+        
         # Use Overpass API to find hotels
         overpass_url = "https://overpass-api.de/api/interpreter"
         
-        # Build query based on keyword
-        amenity_filter = ""
-        if keyword:
-            # Add keyword to search in the name tag
-            amenity_filter = f'["name"~"{keyword}",i]'
+        # Build more sophisticated query based on preferences
+        amenity_filters = []
         
-        # Query for hotels within 5km radius
+        # Add amenity filters based on preferences
+        if "Pool" in preferences:
+            amenity_filters.append('["leisure"="swimming_pool"]')
+        if "Spa" in preferences:
+            amenity_filters.append('["leisure"="spa"]')
+        if "Restaurant" in preferences:
+            amenity_filters.append('["amenity"="restaurant"]')
+        if "Free WiFi" in preferences:
+            amenity_filters.append('["internet_access"="wlan"]')
+        if "Gym" in preferences:
+            amenity_filters.append('["leisure"="fitness_centre"]')
+        if "Pet Friendly" in preferences:
+            amenity_filters.append('["pets"="yes"]')
+            
+        # Build the query
+        amenity_filter_str = "".join(amenity_filters) if amenity_filters else ""
+        
+        # Query for hotels within radius (adjusted based on location type - cities get larger radius)
+        radius = 10000  # 10km default
+        if "city" in location_data[0].get("type", ""):
+            radius = 15000  # 15km for cities
+        
+        # Query for hotels
         overpass_query = f"""
         [out:json];
         (
-          node["tourism"="hotel"]{amenity_filter}(around:5000,{lat},{lon});
-          way["tourism"="hotel"]{amenity_filter}(around:5000,{lat},{lon});
-          relation["tourism"="hotel"]{amenity_filter}(around:5000,{lat},{lon});
-          node["building"="hotel"]{amenity_filter}(around:5000,{lat},{lon});
-          way["building"="hotel"]{amenity_filter}(around:5000,{lat},{lon});
-          relation["building"="hotel"]{amenity_filter}(around:5000,{lat},{lon});
+          node["tourism"="hotel"]{amenity_filter_str}(around:{radius},{lat},{lon});
+          way["tourism"="hotel"]{amenity_filter_str}(around:{radius},{lat},{lon});
+          node["building"="hotel"]{amenity_filter_str}(around:{radius},{lat},{lon});
+          way["building"="hotel"]{amenity_filter_str}(around:{radius},{lat},{lon});
         );
         out body;
         """
+        
+        if st.session_state.get('debug_mode', False):
+            st.sidebar.write("Overpass Query:")
+            st.sidebar.code(overpass_query, language="text")
         
         # Respect rate limits
         time.sleep(1)
@@ -196,10 +143,18 @@ def get_hotels_osm(location, keyword=None):
         response.raise_for_status()
         hotels_data = response.json()
         
+        if st.session_state.get('debug_mode', False):
+            st.sidebar.write(f"Found {len(hotels_data.get('elements', []))} hotels")
+        
+        # Process and enhance hotel data
         hotels = []
         for element in hotels_data.get("elements", []):
             tags = element.get("tags", {})
             
+            # Skip hotels without names
+            if not tags.get("name"):
+                continue
+                
             # Format address
             address_parts = []
             if tags.get("addr:housenumber"):
@@ -213,496 +168,406 @@ def get_hotels_osm(location, keyword=None):
             
             address = ", ".join(address_parts) if address_parts else "Address not available"
             
-            # Determine latitude and longitude
-            if element["type"] == "node":
-                hotel_lat = element.get("lat")
-                hotel_lon = element.get("lon")
+            # Generate synthetic data where OSM data is limited
+            # This would be replaced with real data in a production system
+            stars = tags.get("stars")
+            if not stars:
+                stars = random.randint(1, 5)
             else:
-                # For ways and relations, use the original search coordinates
-                hotel_lat = lat
-                hotel_lon = lon
+                try:
+                    stars = int(float(stars))
+                except:
+                    stars = random.randint(2, 5)
             
-            # Get hotel details
+            # Generate rating (OSM doesn't have ratings)
+            rating = tags.get("rating")
+            if not rating:
+                # Weight based on stars
+                base = 5.0 if stars >= 4 else (4.0 if stars >= 3 else 3.0)
+                variation = random.uniform(-0.9, 0.9)
+                rating = round(min(5.0, max(1.0, base + variation)), 1)
+            else:
+                try:
+                    rating = float(rating)
+                except:
+                    rating = round(random.uniform(3.0, 4.9), 1)
+            
+            # Skip hotels with ratings below minimum threshold
+            if rating < min_rating:
+                continue
+                
+            # Generate price level based on stars
+            if budget_level == "Budget":
+                if stars >= 4:
+                    continue  # Skip luxury hotels for budget travelers
+                price_range = "€" * random.randint(1, 2)
+                price_per_night = random.randint(40, 90)
+            elif budget_level == "Mid-range":
+                if stars < 2 or stars > 4:
+                    continue  # Skip very basic or luxury hotels
+                price_range = "€" * random.randint(2, 3)
+                price_per_night = random.randint(80, 180)
+            else:  # Luxury
+                if stars < 3:
+                    continue  # Skip basic hotels for luxury travelers
+                price_range = "€" * random.randint(3, 5)
+                price_per_night = random.randint(150, 450)
+            
+            # Detect amenities (some from OSM, some generated)
+            amenities = []
+            if "internet_access" in tags or random.random() > 0.2:
+                amenities.append("WiFi")
+            if "swimming_pool" in tags or "leisure" in tags and "swimming_pool" in tags["leisure"] or random.random() > 0.7:
+                amenities.append("Pool")
+            if "restaurant" in tags or random.random() > 0.4:
+                amenities.append("Restaurant")
+            if "parking" in tags or random.random() > 0.5:
+                amenities.append("Parking")
+            if "air_conditioning" in tags or random.random() > 0.6:
+                amenities.append("A/C")
+            if random.random() > 0.7:
+                amenities.append("Gym")
+            if random.random() > 0.8:
+                amenities.append("Spa")
+            
+            # Calculate appropriate match scores for different trip purposes
+            business_score = 0
+            family_score = 0
+            romantic_score = 0
+            solo_score = 0
+            
+            # Business travel
+            if "internet_access" in tags:
+                business_score += 2
+            if "conference" in tags:
+                business_score += 3
+            if "fitness_centre" in tags:
+                business_score += 1
+            if stars >= 3:
+                business_score += 2
+            if "Pool" in amenities:
+                business_score += 1
+            
+            # Family travel
+            if "swimming_pool" in tags:
+                family_score += 3
+            if stars >= 3 and stars <= 4:
+                family_score += 2
+            if "Parking" in amenities:
+                family_score += 2
+            if "Restaurant" in amenities:
+                family_score += 2
+            
+            # Romantic travel
+            if stars >= 4:
+                romantic_score += 3
+            if "Spa" in amenities:
+                romantic_score += 2
+            if "Restaurant" in amenities:
+                romantic_score += 2
+            
+            # Solo travel
+            if "WiFi" in amenities:
+                solo_score += 2
+            if price_per_night < 120:
+                solo_score += 2
+            if "Restaurant" in amenities:
+                solo_score += 1
+            
+            # Add random variation
+            business_score += random.randint(-1, 2)
+            family_score += random.randint(-1, 2)
+            romantic_score += random.randint(-1, 2)
+            solo_score += random.randint(-1, 2)
+            
+            # Match score based on selected trip purpose
+            if trip_purpose == "Business":
+                match_score = business_score
+            elif trip_purpose == "Family":
+                match_score = family_score
+            elif trip_purpose == "Romantic":
+                match_score = romantic_score
+            else:  # Solo
+                match_score = solo_score
+                
+            # Boost score for each matched preference
+            for preference in preferences:
+                if preference == "Pool" and "Pool" in amenities:
+                    match_score += 2
+                elif preference == "Spa" and "Spa" in amenities:
+                    match_score += 2
+                elif preference == "Restaurant" and "Restaurant" in amenities:
+                    match_score += 1
+                elif preference == "Free WiFi" and "WiFi" in amenities:
+                    match_score += 1
+                elif preference == "Gym" and "Gym" in amenities:
+                    match_score += 1
+            
+            # Get approximate distance from center
+            if element.get("type") == "node" and element.get("lat") and element.get("lon"):
+                lat2 = float(element.get("lat"))
+                lon2 = float(element.get("lon"))
+                # Simple approximation - not accurate for large distances
+                distance = ((float(lat) - lat2)**2 + (float(lon) - lon2)**2)**0.5 * (111.32 * 1000)  # meters
+                distance_str = f"{int(distance/1000)} km from center" if distance > 1000 else f"{int(distance)} m from center"
+            else:
+                distance_str = "Distance unknown"
+                distance = 5000  # Default for sorting
+                
+            # Generate hotel data
             hotel = {
-                "Name": tags.get("name", "Unnamed Hotel"),
+                "Name": tags.get("name"),
                 "Address": address,
-                "Stars": tags.get("stars", "N/A"),
-                "Phone": tags.get("phone", "N/A"),
-                "Website": tags.get("website", "N/A"),
-                "lat": hotel_lat,
-                "lon": hotel_lon
+                "Stars": stars,
+                "Rating": rating,
+                "Price Range": price_range,
+                "Price Per Night": f"${price_per_night}",
+                "Raw Price": price_per_night,  # For sorting
+                "Phone": tags.get("phone", "Not available"),
+                "Website": tags.get("website", "Not available"),
+                "Amenities": amenities,
+                "Match Score": match_score,
+                "Distance": distance_str,
+                "Raw Distance": distance,  # For sorting
+                "Description": generate_hotel_description(tags.get("name"), stars, trip_purpose, amenities)
             }
             
             hotels.append(hotel)
         
+        # Sort by match score (descending)
+        hotels.sort(key=lambda x: x["Match Score"], reverse=True)
+        
         return hotels
     
     except requests.exceptions.RequestException as e:
-        st.sidebar.error(f"Request Error: {str(e)}")
+        if st.session_state.get('debug_mode', False):
+            st.sidebar.error(f"Request Error: {str(e)}")
         return []
 
-# Customer Segmentation using K-means clustering
-def cluster_customers(customers):
-    # Prepare the data
-    # Convert categorical variables to numeric using one-hot encoding
-    customers_encoded = pd.get_dummies(
-        customers, 
-        columns=['gender', 'income_level', 'travel_purpose', 'preferred_amenity']
-    )
-    
-    # Scale the data
-    scaler = StandardScaler()
-    scaled_features = scaler.fit_transform(customers_encoded.drop('customer_id', axis=1))
-    
-    # Apply K-means clustering
-    kmeans = KMeans(n_clusters=4, random_state=42)
-    customers_encoded['cluster'] = kmeans.fit_predict(scaled_features)
-    
-    # Merge clusters back to original dataframe
-    customers_with_clusters = customers.copy()
-    customers_with_clusters['cluster'] = customers_encoded['cluster']
-    
-    # Get cluster insights
-    cluster_insights = {}
-    for cluster in customers_with_clusters['cluster'].unique():
-        cluster_data = customers_with_clusters[customers_with_clusters['cluster'] == cluster]
-        
-        cluster_insights[cluster] = {
-            'size': len(cluster_data),
-            'avg_age': cluster_data['age'].mean(),
-            'top_purpose': cluster_data['travel_purpose'].mode()[0],
-            'top_amenity': cluster_data['preferred_amenity'].mode()[0],
-            'income_distribution': cluster_data['income_level'].value_counts().to_dict()
-        }
-    
-    return customers_with_clusters, cluster_insights
-
-# Booking Cancellation Prediction
-def predict_cancellations(bookings, customers):
-    # Merge bookings with customer data to get more features
-    data = bookings.merge(customers, on='customer_id')
-    
-    # Prepare the data for modeling
-    features = ['length_of_stay', 'booking_value', 'lead_time', 'age']
-    
-    # Add categorical features
-    categorical_features = ['season', 'booking_channel', 'income_level', 'travel_purpose']
-    for feature in categorical_features:
-        dummies = pd.get_dummies(data[feature], prefix=feature)
-        features.extend(dummies.columns)
-        data = pd.concat([data, dummies], axis=1)
-    
-    X = data[features]
-    y = data['canceled']
-    
-    # Split the data
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    
-    # Train a Random Forest model
-    rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
-    rf_model.fit(X_train, y_train)
-    
-    # Make predictions
-    y_pred = rf_model.predict(X_test)
-    
-    # Calculate accuracy
-    accuracy = accuracy_score(y_test, y_pred)
-    
-    # Create confusion matrix
-    cm = confusion_matrix(y_test, y_pred)
-    
-    # Feature importance
-    feature_importance = pd.DataFrame({
-        'Feature': features,
-        'Importance': rf_model.feature_importances_
-    }).sort_values('Importance', ascending=False)
-    
-    return rf_model, accuracy, cm, feature_importance
-
-# Review Sentiment Analysis
-def analyze_reviews(reviews):
-    # Calculate sentiment scores for each review
-    reviews['sentiment_scores'] = reviews['review_text'].apply(
-        lambda text: sid.polarity_scores(text)
-    )
-    
-    # Extract compound sentiment score
-    reviews['sentiment'] = reviews['sentiment_scores'].apply(
-        lambda score_dict: score_dict['compound']
-    )
-    
-    # Categorize sentiment
-    reviews['sentiment_category'] = reviews['sentiment'].apply(
-        lambda score: 'Positive' if score > 0.2 else ('Negative' if score < -0.2 else 'Neutral')
-    )
-    
-    # Analyze reviews by hotel
-    hotel_sentiment = reviews.groupby('hotel_id').agg(
-        avg_rating=('rating', 'mean'),
-        avg_sentiment=('sentiment', 'mean'),
-        positive_reviews=('sentiment_category', lambda x: sum(x == 'Positive')),
-        neutral_reviews=('sentiment_category', lambda x: sum(x == 'Neutral')),
-        negative_reviews=('sentiment_category', lambda x: sum(x == 'Negative')),
-        review_count=('review_id', 'count')
-    ).reset_index()
-    
-    return reviews, hotel_sentiment
-
-# Hotel Recommendation System
-def recommend_hotels(hotels, customer_profile, reviews):
-    # Extract customer preferences
-    preferred_amenities = customer_profile['preferred_amenities']
-    purpose = customer_profile['purpose']
-    budget = customer_profile['budget']
-    
-    # Calculate hotel scores based on amenities match and ratings
-    hotel_scores = []
-    
-    for _, hotel in hotels.iterrows():
-        # Calculate amenity match score
-        amenities_list = hotel['amenities'].lower().split(', ')
-        amenity_match = sum(1 for amenity in preferred_amenities if amenity.lower() in ' '.join(amenities_list))
-        amenity_score = amenity_match / len(preferred_amenities) if preferred_amenities else 0
-        
-        # Get average rating
-        rating_score = hotel['avg_rating'] / 5  # Normalize to 0-1 scale
-        
-        # Calculate purpose match
-        if purpose.lower() in hotel['price_category'].lower():
-            purpose_score = 1.0
-        elif (purpose == 'Business' and hotel['price_category'] in ['Business', 'Modern']):
-            purpose_score = 0.8
-        elif (purpose == 'Family' and hotel['price_category'] in ['Family', 'Mid-range']):
-            purpose_score = 0.8
-        elif (purpose == 'Luxury' and hotel['price_category'] in ['Luxury', 'Premium']):
-            purpose_score = 0.8
-        elif (purpose == 'Budget' and hotel['price_category'] in ['Budget', 'Mid-range']):
-            purpose_score = 0.8
-        else:
-            purpose_score = 0.3
-            
-        # Calculate budget match (assuming budget categories align with price_categories)
-        if budget.lower() == hotel['price_category'].lower():
-            budget_score = 1.0
-        elif (budget == 'Budget' and hotel['price_category'] == 'Mid-range') or \
-             (budget == 'Mid-range' and hotel['price_category'] in ['Budget', 'Premium']):
-            budget_score = 0.5
-        else:
-            budget_score = 0.0
-            
-        # Combined score with weighted factors
-        total_score = (
-            0.3 * amenity_score + 
-            0.3 * rating_score + 
-            0.2 * purpose_score + 
-            0.2 * budget_score
-        )
-        
-        hotel_scores.append({
-            'hotel_id': hotel['hotel_id'],
-            'name': hotel['name'],
-            'location': hotel['location'],
-            'price_category': hotel['price_category'],
-            'avg_rating': hotel['avg_rating'],
-            'amenities': hotel['amenities'],
-            'amenity_score': amenity_score,
-            'rating_score': rating_score,
-            'purpose_score': purpose_score,
-            'budget_score': budget_score,
-            'total_score': total_score
-        })
-    
-    # Sort hotels by score
-    recommended_hotels = sorted(hotel_scores, key=lambda x: x['total_score'], reverse=True)
-    
-    return recommended_hotels
-
-# Content-based filtering for reviews
-def content_based_filtering(hotels, reviews):
-    # Combine hotel names with their reviews for content analysis
-    hotel_reviews = {}
-    
-    for _, hotel in hotels.iterrows():
-        hotel_id = hotel['hotel_id']
-        hotel_reviews[hotel_id] = {
-            'name': hotel['name'],
-            'content': hotel['name'] + " " + hotel['location'] + " " + hotel['price_category'] + " " + hotel['amenities']
-        }
-        
-        # Add reviews content
-        hotel_reviews_texts = reviews[reviews['hotel_id'] == hotel_id]['review_text'].tolist()
-        if hotel_reviews_texts:
-            hotel_reviews[hotel_id]['content'] += " " + " ".join(hotel_reviews_texts)
-    
-    # Create a dataframe
-    hotel_content_df = pd.DataFrame([
-        {'hotel_id': hotel_id, 'name': data['name'], 'content': data['content']}
-        for hotel_id, data in hotel_reviews.items()
-    ])
-    
-    # Create TF-IDF vectors
-    tfidf = TfidfVectorizer(stop_words='english')
-    tfidf_matrix = tfidf.fit_transform(hotel_content_df['content'])
-    
-    # Calculate similarity between hotels
-    cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
-    
-    # Create a mapping of hotel names to indices
-    indices = pd.Series(hotel_content_df.index, index=hotel_content_df['name']).drop_duplicates()
-    
-    return indices, cosine_sim, hotel_content_df
-
-# Function to get hotel recommendations based on similarity
-def get_content_recommendations(hotel_name, indices, cosine_sim, hotel_content_df):
-    # Get the index of the hotel
-    idx = indices[hotel_name]
-    
-    # Get similarity scores with all hotels
-    sim_scores = list(enumerate(cosine_sim[idx]))
-    
-    # Sort hotels based on similarity scores
-    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-    
-    # Get top 5 similar hotels (excluding itself)
-    sim_scores = sim_scores[1:6]
-    
-    # Get hotel indices
-    hotel_indices = [i[0] for i in sim_scores]
-    
-    # Return recommended hotels
-    recommendations = hotel_content_df.iloc[hotel_indices][['name', 'hotel_id']]
-    
-    # Add similarity scores
-    recommendations['similarity_score'] = [i[1] for i in sim_scores]
-    
-    return recommendations
-
-# Main application
-def main():
-    st.set_page_config(page_title="Hotel Intelligence System", page_icon="🏨", layout="wide")
-    
-    # Sidebar for navigation
-    st.sidebar.title("Navigation")
-    pages = [
-        "Home", 
-        "Hotel Search", 
-        "Hotel Recommendations", 
-        "Customer Segmentation", 
-        "Cancellation Prediction", 
-        "Review Analysis"
+def generate_hotel_description(name, stars, trip_purpose, amenities):
+    """Generate a synthetic hotel description"""
+    descriptions = [
+        f"{name} offers comfortable accommodation with {len(amenities)} key amenities including {', '.join(amenities[:3]) if amenities else 'modern facilities'}.",
+        f"Located in a convenient area, {name} is a {stars}-star property suitable for {trip_purpose.lower()} travelers.",
+        f"Featuring {', '.join(amenities[:2]) if amenities else 'modern amenities'}, {name} provides a pleasant stay experience.",
+        f"This {stars}-star establishment delivers quality service and features {', '.join(amenities[:3]) if amenities else 'comfortable accommodations'}.",
+        f"{name} welcomes guests with {stars}-star comfort and amenities including {', '.join(amenities[:2]) if amenities else 'essential services'}."
     ]
-    selection = st.sidebar.radio("Go to", pages)
-    
-    # Load data
-    hotels, customers, bookings, reviews = load_sample_data()
-    
-    # Create content-based filtering model
-    indices, cosine_sim, hotel_content_df = content_based_filtering(hotels, reviews)
-    
-    # Analyze reviews
-    reviews_analyzed, hotel_sentiment = analyze_reviews(reviews)
-    
-    # Home page
-    if selection == "Home":
-        st.title("🏨 Hotel Intelligence System")
-        st.write("Welcome to the Hotel Intelligence System powered by Machine Learning!")
-        
-        st.markdown("""
-        ### Features:
-        - **Hotel Search**: Find hotels in any location using OpenStreetMap data
-        - **Hotel Recommendations**: Get personalized hotel recommendations based on your preferences
-        - **Customer Segmentation**: Understand customer segments to provide targeted services
-        - **Cancellation Prediction**: Predict booking cancellations to optimize resource planning
-        - **Review Analysis**: Analyze customer feedback to improve services
-        
-        ### How to use:
-        1. Use the navigation panel on the left to switch between features
-        2. Explore the data visualizations and insights
-        3. Try personalized recommendations and search capabilities
-        
-        ### Sample Dataset:
-        This application is using a sample dataset for demonstration purposes.
-        """)
-        
-        # Display sample data tables
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("Sample Hotels")
-            st.dataframe(hotels[['name', 'location', 'price_category', 'avg_rating']].head())
-            
-        with col2:
-            st.subheader("Bookings Overview")
-            bookings_summary = bookings.groupby('canceled').agg(
-                count=('booking_id', 'count'),
-                avg_value=('booking_value', 'mean'),
-                avg_stay=('length_of_stay', 'mean')
-            ).reset_index()
-            bookings_summary['canceled'] = bookings_summary['canceled'].map({0: 'Confirmed', 1: 'Canceled'})
-            st.dataframe(bookings_summary)
-            
-        # Show some visualizations
-        st.subheader("Dataset Overview")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            fig, ax = plt.subplots()
-            sns.countplot(x='price_category', data=hotels, ax=ax)
-            plt.title('Hotels by Price Category')
-            plt.xticks(rotation=45)
-            st.pyplot(fig)
-            
-        with col2:
-            fig, ax = plt.subplots()
-            sns.histplot(data=reviews, x='rating', kde=True, ax=ax)
-            plt.title('Distribution of Hotel Ratings')
-            st.pyplot(fig)
-    
-    # Hotel Search page
-    elif selection == "Hotel Search":
-        st.title("🔍 Hotel Search")
-        st.write("Find hotels anywhere in the world using OpenStreetMap data")
-        
-        # Create a form for inputs
-        with st.form("hotel_search_form"):
-            # Location input (required)
-            location = st.text_input("Enter a location (e.g. Amsterdam, London, Tokyo)")
-            
-            # Additional keyword search
-            keyword = st.text_input("Filter by name (e.g. Hilton, Marriott)", "")
-            
-            # Radius slider
-            radius = st.slider("Search radius (km)", min_value=1, max_value=10, value=5)
-            
-            # Submit button
-            search_button = st.form_submit_button("Search Hotels")
-        
-        # Process form submission
-        if search_button:
-            if not location:
-                st.warning("Please enter a location to search for hotels.")
-            else:
-                with st.spinner(f"Fetching hotels in {location}..."):
-                    hotels_found = get_hotels_osm(location, keyword)
+    return random.choice(descriptions)
 
-                if hotels_found:
-                    df = pd.DataFrame(hotels_found)
-                    st.success(f"Found {len(df)} hotels in {location}" + 
-                              (f" with name containing '{keyword}'" if keyword else ""))
-                    
-                    # Display dataframe with sorting capability
-                    st.dataframe(df, use_container_width=True)
-                    
-                    # Show map
-                    st.subheader("Hotel Locations")
-                    try:
-                        # Create a map with the hotel locations
-                        map_data = pd.DataFrame({
-                            'lat': df['lat'].astype(float),
-                            'lon': df['lon'].astype(float),
-                            'Name': df['Name']
-                        })
-                        st.map(map_data)
-                    except:
-                        st.info("Map couldn't be displayed. Detailed location data not available.")
-                        
-                else:
-                    st.warning(f"No hotels found in {location}" + 
-                              (f" with name containing '{keyword}'" if keyword else "") + 
-                              ". Please try a different location or remove the name filter.")
-                    
-        # Show sample hotels from dataset
-        st.subheader("Or explore our sample hotel dataset:")
-        st.dataframe(hotels[['name', 'location', 'price_category', 'avg_rating', 'amenities']])
+def main():
+    # Initialize session state
+    if 'searched' not in st.session_state:
+        st.session_state.searched = False
+    if 'debug_mode' not in st.session_state:
+        st.session_state.debug_mode = False
+    
+    # Create two columns for the header
+    header_col1, header_col2 = st.columns([3, 1])
+    
+    with header_col1:
+        st.title("🏨 Smart Hotel Recommender")
+        st.write("Find personalized hotel recommendations based on your preferences")
+    
+    with header_col2:
+        # Debug mode toggle in the header right
+        debug_toggle = st.checkbox("Show Debug Information", value=st.session_state.debug_mode)
+        st.session_state.debug_mode = debug_toggle
+    
+    # Create a sidebar for search parameters
+    st.sidebar.title("Find Your Perfect Stay")
+    
+    # Create a form for inputs
+    with st.sidebar.form("hotel_search_form"):
+        # Location input (required)
+        location = st.text_input("Destination", "London")
         
-        # Similar hotels
-        st.subheader("Find similar hotels:")
-        selected_hotel = st.selectbox(
-            "Select a hotel to find similar options:", 
-            options=hotels['name'].tolist()
+        # Trip details
+        col1, col2 = st.columns(2)
+        with col1:
+            check_in = st.date_input("Check-in", datetime.now())
+        with col2:
+            check_out = st.date_input("Check-out", datetime.now() + timedelta(days=3))
+            
+        # Trip purpose
+        trip_purpose = st.selectbox(
+            "Trip Purpose",
+            options=["Business", "Family", "Romantic", "Solo"]
         )
         
-        if selected_hotel:
-            similar_hotels = get_content_recommendations(
-                selected_hotel, indices, cosine_sim, hotel_content_df
-            )
-            
-            st.write(f"Hotels similar to {selected_hotel}:")
-            st.dataframe(similar_hotels)
-    
-    # Hotel Recommendations page
-    elif selection == "Hotel Recommendations":
-        st.title("💎 Personalized Hotel Recommendations")
-        st.write("Get hotel recommendations based on your preferences")
+        # Budget level
+        budget_level = st.select_slider(
+            "Budget Level",
+            options=["Budget", "Mid-range", "Luxury"]
+        )
         
-        # User preferences form
-        st.subheader("Tell us your preferences")
+        # Preferences
+        st.write("Preferences")
+        preferences = st.multiselect(
+            "Select amenities you prefer",
+            options=["Pool", "Spa", "Restaurant", "Free WiFi", "Gym", "Pet Friendly"]
+        )
+        
+        # Minimum rating
+        min_rating = st.slider("Minimum Rating", min_value=1.0, max_value=5.0, value=3.0, step=0.5)
+        
+        # Submit button
+        search_button = st.form_submit_button("Find Hotels")
+    
+    # Process form submission
+    if search_button:
+        st.session_state.searched = True
+        if not location:
+            st.warning("Please enter a destination to search for hotels.")
+            return
+
+        with st.spinner(f"Finding the best hotels in {location} for your {trip_purpose.lower()} trip..."):
+            hotels = get_hotels_with_recommendations(
+                location, 
+                preferences,
+                budget_level,
+                trip_purpose,
+                min_rating
+            )
+
+        if hotels:
+            # Display recommendations
+            st.subheader(f"🌟 Top Hotel Recommendations for {location}")
+            
+            # Add filter options
+            col1, col2 = st.columns(2)
+            with col1:
+                sort_by = st.selectbox(
+                    "Sort by",
+                    options=["Recommendation Score", "Rating", "Price (Low to High)", "Price (High to Low)", "Distance"],
+                    key="sort_by"
+                )
+            
+            with col2:
+                filter_amenity = st.multiselect(
+                    "Filter by amenities",
+                    options=["Pool", "Spa", "Restaurant", "WiFi", "Parking", "Gym", "A/C"],
+                    key="filter_amenity"
+                )
+            
+            # Apply sorting
+            if sort_by == "Rating":
+                hotels.sort(key=lambda x: x["Rating"], reverse=True)
+            elif sort_by == "Price (Low to High)":
+                hotels.sort(key=lambda x: x["Raw Price"])
+            elif sort_by == "Price (High to Low)":
+                hotels.sort(key=lambda x: x["Raw Price"], reverse=True)
+            elif sort_by == "Distance":
+                hotels.sort(key=lambda x: x["Raw Distance"])
+            # Default is already sorted by recommendation score
+            
+            # Apply filtering
+            if filter_amenity:
+                hotels = [h for h in hotels if all(amenity in h["Amenities"] for amenity in filter_amenity)]
+            
+            if not hotels:
+                st.warning("No hotels match your filtered criteria. Try removing some filters.")
+                return
+                
+            st.success(f"Found {len(hotels)} hotels matching your criteria")
+            
+            # Create hotel cards
+            for i, hotel in enumerate(hotels):
+                with st.container():
+                    st.markdown(f"""<div class="hotel-card">""", unsafe_allow_html=True)
+                    
+                    # Create two columns for the hotel info
+                    col1, col2 = st.columns([2, 3])
+                    
+                    with col1:
+                        # Use a placeholder image (would be real hotel images in production)
+                        hotel_img_num = (i % 5) + 1  # Cycle through 5 placeholder images
+                        st.image(f"https://source.unsplash.com/random/300x200/?hotel,room,{hotel_img_num}", 
+                                use_column_width=True)
+                        
+                        # Pricing and booking info
+                        st.markdown(f"""
+                        <h3>{hotel["Price Per Night"]}<span style="font-size:0.8em;"> per night</span></h3>
+                        <p>Total: ${int(hotel["Raw Price"] * (check_out - check_in).days)} for {(check_out - check_in).days} nights</p>
+                        """, unsafe_allow_html=True)
+                        
+                        st.button("Reserve Now", key=f"book_{i}")
+                        
+                    with col2:
+                        # Hotel header with name and recommendation badge
+                        if i < 3:  # Top 3 recommendations get special badges
+                            badge = f"""<span class="recommendation-badge">Top {i+1} Pick!</span>"""
+                        else:
+                            badge = ""
+                            
+                        star_display = "⭐" * hotel["Stars"]
+                        
+                        st.markdown(f"""
+                        <h2>{badge}{hotel["Name"]}</h2>
+                        <p>{star_display} · {hotel["Distance"]}</p>
+                        """, unsafe_allow_html=True)
+                        
+                        # Hotel rating with color coding
+                        rating_class = "rating-high" if hotel["Rating"] >= 4.5 else ("rating-medium" if hotel["Rating"] >= 3.5 else "rating-low")
+                        st.markdown(f"""<p>Rating: <span class="{rating_class}">{hotel["Rating"]}/5</span></p>""", unsafe_allow_html=True)
+                        
+                        # Description
+                        st.markdown(f"""<p>{hotel["Description"]}</p>""", unsafe_allow_html=True)
+                        
+                        # Amenities as tags
+                        amenity_tags = " ".join([f'<span class="feature-tag">{amenity}</span>' for amenity in hotel["Amenities"]])
+                        st.markdown(f"""<div>{amenity_tags}</div>""", unsafe_allow_html=True)
+                        
+                        # Match score for your preferences
+                        match_percentage = min(100, int(hotel["Match Score"] * 10))
+                        st.progress(match_percentage/100)
+                        st.markdown(f"""<p style="text-align:right">{match_percentage}% match for your {trip_purpose.lower()} trip</p>""", unsafe_allow_html=True)
+                    
+                    st.markdown("""</div>""", unsafe_allow_html=True)
+            
+            # Add map of hotels
+            st.subheader("Hotel Locations")
+            st.write("Map functionality would require additional configuration")
+            
+        else:
+            st.warning(f"No hotels found in {location} matching your criteria. Please try different parameters.")
+            
+            # Provide troubleshooting help
+            with st.expander("Troubleshooting Tips"):
+                st.markdown("""
+                ### Common Issues:
+                1. **Location not recognized**: Try a more general location (e.g., "London UK" instead of specific neighborhoods)
+                2. **Too many filters**: Reduce your preference requirements
+                3. **Rating threshold too high**: Lower the minimum rating
+                4. **Budget level restrictions**: Try a different budget level
+                """)
+    
+    # First time instructions
+    if not st.session_state.searched:
+        # Display welcome information
+        st.subheader("🌟 Welcome to Smart Hotel Recommender!")
+        st.write("Find your perfect accommodation based on your personal preferences and trip purpose.")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            travel_purpose = st.selectbox(
-                "What's the purpose of your travel?",
-                ["Business", "Leisure", "Family", "Romantic", "Adventure"]
-            )
-            
-            budget = st.selectbox(
-                "What's your budget range?",
-                ["Budget", "Mid-range", "Premium", "Luxury"]
-            )
-            
+            st.markdown("""
+            ### How it works:
+            1. Enter your destination and trip details
+            2. Select your preferences and budget level
+            3. Get personalized hotel recommendations
+            4. Filter and sort to find your perfect match
+            """)
+        
         with col2:
-            amenities = st.multiselect(
-                "What amenities are important to you?",
-                ["WiFi", "Pool", "Spa", "Restaurant", "Gym", "Business Center", 
-                 "Beach access", "Room Service", "Kids Club", "Pet-friendly"]
-            )
-            
-            location_pref = st.selectbox(
-                "What type of location do you prefer?",
-                ["City Center", "Beach", "Mountains", "Countryside", "Any"]
-            )
-        
-        # Create customer profile
-        customer_profile = {
-            'purpose': travel_purpose,
-            'budget': budget,
-            'preferred_amenities': amenities,
-            'location_preference': location_pref
-        }
-        
-        # Get recommendations button
-        if st.button("Get Recommendations"):
-            with st.spinner("Finding the perfect hotels for you..."):
-                # Get recommended hotels
-                recommended_hotels = recommend_hotels(hotels, customer_profile, reviews_analyzed)
-                
-                # Display top recommendations
-                st.subheader("Top Recommended Hotels for You")
-                
-                if recommended_hotels:
-                    for i, hotel in enumerate(recommended_hotels[:5]):
-                        with st.container():
-                            col1, col2 = st.columns([1, 3])
-                            
-                            with col1:
-                                st.subheader(f"#{i+1}")
-                                st.metric("Match Score", f"{hotel['total_score']:.2f}")
-                                
-                            with col2:
-                                st.subheader(hotel['name'])
-                                st.write(f"**Location:** {hotel['location']} | **Category:** {hotel['price_category']}")
-                                st.write(f"**Rating:** {hotel['avg_rating']}/5")
-                                st.write(f"**Amenities:** {hotel['amenities']}")
-                                
-                                # Show match details
-                                st.progress(hotel['total_score'])
-                                
-                                match_details = {
-                                    "Amenities Match": hotel['amenity_score'],
-                                    "Rating Score": hotel['rating_score'],
-                                    "Purpose Match": hotel['purpose_score'],
-                                    "Budget Match": hotel['budget_score']
-                                }
-                                
-                                st.write("**Match Details:**")
+            st.markdown("""
+            ### Recommendation factors:
+            - ✅ Match for your trip purpose
+            - ✅ Amenities that matter to you
+            - ✅ Your budget preferences
+            - ✅ Hotel ratings and quality
+            - ✅ Location and convenience
+            """)
+
+if __name__ == "__main__":
+    main()
